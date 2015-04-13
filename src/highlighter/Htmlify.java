@@ -9,31 +9,45 @@ import java.io.*;
  * target directory
  */
 public class Htmlify {
-    private final Parser parser = new Parser(new NaiveMatcher());
+//    private final Parser parser = new Parser(new StringMatcher());
+    private final Stats stats;
+    private final Parser parser;// = new Parser(new NaiveMatcher());
+
     public String cssLink = null;
 
-    public Htmlify (String cssLink) {
+    public Htmlify (Stats stats, String cssLink) {
+        this.stats = stats;
+//        this.parser = new Parser(new NaiveMatcher(stats), stats);
+        this.parser = new Parser(new StringMatcher(stats), stats);
         this.cssLink = cssLink;
     }
 
     private long parseTime;
+    private int fileCount = 0;
 
     public double getParseTime () {
         return (double)(parseTime) * 1e-6;
     }
+    public int getFileCount () {
+        return fileCount;
+    }
     public void reset () {
         parseTime = 0;
+        fileCount = 0;
     }
 
 
     void generateHtml (File inputFile, File outputFile) {
-        System.out.printf("Processing '%s'\n", inputFile.getPath());
+//        System.out.printf("Processing '%s'\n", inputFile.getPath());
 //        String source = null;
 //        try {
 //            source = String.join("\n", Files.readAllLines(inputFile.toPath()));
 //        } catch (IOException e) {
 //            e.printStackTrace();
 //        }
+        stats.beginProcessingFile();
+        ++fileCount;
+        stats.beginFileRead();
         StringBuilder sb = new StringBuilder();
         try (BufferedReader reader = new BufferedReader(new FileReader(inputFile))) {
             int c;
@@ -45,20 +59,25 @@ public class Htmlify {
             e.printStackTrace();
         }
         String source = sb.toString();
-        long t0 = System.nanoTime();
+        stats.endFileRead();
+//        long t0 = System.nanoTime();
         String html = parser.makeHtml(source, cssLink);
-        parseTime += (System.nanoTime() - t0);
+//        parseTime += (System.nanoTime() - t0);
 
+        stats.beginFileWrite();
         try (BufferedWriter br = new BufferedWriter(new FileWriter(outputFile))) {
             br.write(html);
         } catch (IOException e) {
             e.printStackTrace();
         }
-        System.out.printf("Generated '%s'\n\n", outputFile.getPath());
+        stats.endFileWrite();
+        stats.endProcessingFile();
+//        System.out.printf("Generated '%s'\n\n", outputFile.getPath());
     }
 
     void processDir (File dir, String rootPath, String outputPath) {
         assert(dir.isDirectory() && dir.exists());
+        stats.beginProcessingDir();
 
         System.out.printf("Processing '%s'\n", dir.getPath());
 
@@ -74,6 +93,7 @@ public class Htmlify {
                 return name.endsWith(".java");
             }
         });
+        stats.endProcessingDir();
         for (File subdir : subdirs)
             processDir(subdir, rootPath, outputPath);
 
@@ -106,13 +126,22 @@ public class Htmlify {
             System.exit(-1);
         }
 
-        Htmlify htmlify = new Htmlify(css);
+        Stats stats = new Stats();
+        Htmlify htmlify = new Htmlify(stats, css);
 
-        long startTime = System.nanoTime();
+//        long startTime = System.nanoTime();
+
+        stats.startHtmlify();
         htmlify.processDir(new File(inputDir), inputDir, outputDir);
-        double elapsedTime = (double)(System.nanoTime() - startTime) * 1e-6;
-        System.out.printf("processed all files in '%s'\n", inputDir);
-        System.out.printf("\ttotal run time: %f ms\n", elapsedTime);
-        System.out.printf("\tparse time: %f ms\n", htmlify.getParseTime());
+        stats.endHtmlify();
+
+//        double elapsedTime = (double)(System.nanoTime() - startTime) * 1e-6;
+        System.out.printf("finished processing '%s'\n", inputDir);
+        System.out.printf("generated %d files in '%s'\n", htmlify.getFileCount(), outputDir);
+//        System.out.printf("\tparse time: %f ms\n", htmlify.getParseTime());
+//        System.out.printf("\toverhead:   %f ms\n", elapsedTime - htmlify.getParseTime());
+//        System.out.printf("\ttotal run time: %f ms\n", elapsedTime);
+
+        System.out.println(stats.getStats());
     }
 }

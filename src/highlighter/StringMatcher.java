@@ -55,6 +55,8 @@ import java.util.Map;
  */
 public class StringMatcher implements Matcher {
 
+    private final Stats stats;
+
     // Utility class used internally to store match rules and rebuild the trie
     // This is a mutable (but slightly inefficient) implementation of the StringMatcher, and stores the same data
     // as the immutable, but much more efficient trie data structure.
@@ -193,18 +195,21 @@ public class StringMatcher implements Matcher {
     int tags;
 
     // Construct a new StringMatcher
-    public StringMatcher () {
-        builder = new TrieBuilder();
+    public StringMatcher (Stats stats) {
+        this.stats = stats;
+        this.builder = new TrieBuilder();
     }
 
     // Construct a new StringMatcher and insert the following strings with the given tag
-    public StringMatcher(String[] strings, int tag) {
+    public StringMatcher(Stats stats, String[] strings, int tag) {
+        this.stats = stats;
         builder = new TrieBuilder();
         for (String s : strings)
             builder.add(s, tag);
     }
     // Construct a new StringMatcher and insert the following strings with the given tag
-    public StringMatcher (ArrayList<String> strings, int tag) {
+    public StringMatcher (Stats stats, ArrayList<String> strings, int tag) {
+        this.stats = stats;
         builder = new TrieBuilder();
         for (String s : strings)
             builder.add(s, tag);
@@ -212,13 +217,17 @@ public class StringMatcher implements Matcher {
 
     // Add a rule to match the following string to the given tag
     public void add (String s, int tag) {
+        stats.beginTrieInit();
         builder.add(s, tag);
+        stats.endTrieInit();
     }
 
     // Add a rule to match the following strings to the given tag
     public void add (String[] strings, int tag) {
+        stats.beginTrieInit();
         for (String s : strings)
             add(s, tag);
+        stats.endTrieInit();
     }
 
     // Rebuilds the internal trie structure from the current set of rules.
@@ -226,7 +235,9 @@ public class StringMatcher implements Matcher {
     // If match() has been called but additional rules have been added since the last call, call this to update
     // the internal data structure (without this, calls to add() have no effect after the first call).
     public void rebuild() {
+        stats.beginTrieInit();
         trie = builder.build();
+        stats.endTrieInit();
     }
 
     // Checks the following string starting at index i against the string matcher, matching as far as possible and
@@ -240,7 +251,9 @@ public class StringMatcher implements Matcher {
             last = i;
             return 0;
         } else {
+            stats.beginTrieMatch();
             last = trie.match(s, i, this);
+            stats.endTrieMatch();
             matched = last - i;
             return tags;
         }

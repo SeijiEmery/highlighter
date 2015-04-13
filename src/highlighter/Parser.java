@@ -8,6 +8,7 @@ import java.util.ArrayList;
  */
 public class Parser {
     Matcher textMatcher;
+    Stats stats;
 
     static final int KEYWORD_FLAG               = 0x1 << 0;
     static final int SINGLE_LINE_COMMENT        = 0x1 << 1;
@@ -30,8 +31,10 @@ public class Parser {
     String foob = ""+"";
     /* foo *//* bar */
 
-    Parser (Matcher matcher) {
-        long startTime = System.nanoTime();
+    Parser (Matcher matcher, Stats stats) {
+//        long startTime = System.nanoTime();
+        this.stats = stats;
+        stats.beginParserInit();
 
         String[] keywords = {
                 "abstract", "continue", "for", "new", "switch", "assert", "default", "goto", "package", "synchronized",
@@ -69,20 +72,22 @@ public class Parser {
         };
         textMatcher.add(terminals, TERMINAL);
 
-        long insertionTime = System.nanoTime();
+        stats.endParserInit();
+
+//        long insertionTime = System.nanoTime();
 
 //        textMatcher.rebuild();
-        long trieBuildTime = System.nanoTime();
+//        long trieBuildTime = System.nanoTime();
 
-        System.out.println("Parser structure: (DEBUG)");
-        System.out.println(textMatcher);
-        long printoutTime = System.nanoTime();
+//        System.out.println("Parser structure: (DEBUG)");
+//        System.out.println(textMatcher);
+//        long printoutTime = System.nanoTime();
 
-        double elapsedTime = (double)(printoutTime - startTime) * 1e-6;
-        System.out.printf("Parser initialized in %f ms\n", elapsedTime);
-        System.out.printf("\ttriebuilder:   %f ms\n", (double)(insertionTime - startTime) * 1e-6);
-        System.out.printf("\ttrie rebuild:  %f ms\n", (double)(trieBuildTime - insertionTime) * 1e-6);
-        System.out.printf("\ttrie printout: %f ms\n\n", (double)(printoutTime - trieBuildTime) * 1e-6);
+//        double elapsedTime = (double)(printoutTime - startTime) * 1e-6;
+//        System.out.printf("Parser initialized in %f ms\n", elapsedTime);
+//        System.out.printf("\ttriebuilder:   %f ms\n", (double)(insertionTime - startTime) * 1e-6);
+//        System.out.printf("\ttrie rebuild:  %f ms\n", (double)(trieBuildTime - insertionTime) * 1e-6);
+//        System.out.printf("\ttrie printout: %f ms\n\n", (double)(printoutTime - trieBuildTime) * 1e-6);
     }
 
     enum TokenType {
@@ -153,12 +158,15 @@ public class Parser {
     }
 
     public ArrayList<Token> parse(String s) {
+
+        stats.beginParse();
+
         tokens = new ArrayList<Token>();
         prev = 0;
 
         int e;   // tmp var
 
-        long startTime = System.nanoTime();
+//        long startTime = System.nanoTime();
         for (int i = 0, n = s.length(); i < n;) {
             switch (textMatcher.match(s, i)) {
                 case SINGLE_LINE_COMMENT:
@@ -274,8 +282,10 @@ public class Parser {
         }
         beginToken(s, s.length());  // adds last token
 
-        long endTime = System.nanoTime();
-        System.out.printf("\tparsing: %f ms\n", (double)(endTime - startTime) * 1e-6);
+        stats.endParse();
+
+//        long endTime = System.nanoTime();
+//        System.out.printf("\tparsing: %f ms\n", (double)(endTime - startTime) * 1e-6);
 //        System.out.println("Input:");
 //        System.out.println(s);
 //        System.out.println("Tokens:");
@@ -288,11 +298,14 @@ public class Parser {
     }
 
     public String makeHtml(String sourceCode, String cssLink) {
-        System.out.printf("Processing source code\n");
-        long startTime = System.nanoTime();
+//        System.out.printf("Processing source code\n");
+//        long startTime = System.nanoTime();
         ArrayList<Token> tokens = parse(sourceCode);
 
-        long htmlStart = System.nanoTime();
+//        long htmlStart = System.nanoTime();
+
+        stats.beginHtmlGen();
+
         StringBuilder sb = new StringBuilder();
         if (cssLink != null)
             sb.append(String.format("<head><link href=\"%s\" type=\"text/css\" rel=\"stylesheet\" /></head>", cssLink));
@@ -301,10 +314,12 @@ public class Parser {
         sb.append("<body><pre class=\"prettyprint\"><code>");
         spanify(tokens, sb);
         sb.append("</code></pre></body>");
-        long htmlEnd = System.nanoTime();
 
-        System.out.printf("\thtml generation: %f ms\n", (double)(htmlEnd - htmlStart) * 1e-6);
-        System.out.printf("\ttotal time: %f ms\n\n", (double)(htmlEnd - startTime) * 1e-6);
+        stats.endHtmlGen();
+//        long htmlEnd = System.nanoTime();
+
+//        System.out.printf("\thtml generation: %f ms\n", (double)(htmlEnd - htmlStart) * 1e-6);
+//        System.out.printf("\ttotal time: %f ms\n\n", (double)(htmlEnd - startTime) * 1e-6);
 
         return sb.toString();
     }
@@ -396,9 +411,12 @@ public class Parser {
             System.err.printf("Error reading file '%s'\n", args[0]);
             e.printStackTrace();
         }
+
+        Stats stats = new Stats();
+
         String sourceCode = sb.toString();
-        String html = new Parser(new StringMatcher()).makeHtml(sourceCode, cssFile);
-        String html2 = new Parser(new NaiveMatcher()).makeHtml(sourceCode, cssFile);
+        String html = new Parser(new StringMatcher(stats), stats).makeHtml(sourceCode, cssFile);
+        String html2 = new Parser(new NaiveMatcher(stats), stats).makeHtml(sourceCode, cssFile);
         assert(html2.equals(html));
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(outputFile))) {
             writer.write(html);

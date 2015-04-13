@@ -10,13 +10,13 @@ public class NaiveMatcher implements Matcher {
     Map<String, Integer> sequences = new HashMap<>();
     int maxLen = 0;
 
-    public NaiveMatcher () {}
-    public NaiveMatcher (String s, int tags) {
-        add(s, tags);
-    }
-    public NaiveMatcher (String[] s, int tags) {
-        add(s, tags);
-    }
+    public NaiveMatcher (Stats stats) {}
+//    public NaiveMatcher (String s, int tags) {
+//        add(s, tags);
+//    }
+//    public NaiveMatcher (String[] s, int tags) {
+//        add(s, tags);
+//    }
 
     @Override
     public void add(String s, int tags) {
