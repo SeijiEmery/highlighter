@@ -4,7 +4,6 @@ import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.LinkedBlockingQueue;
 
 /**
@@ -23,8 +22,8 @@ public class Htmlify {
     static final boolean USE_FAST_STATS     = true;
     static final boolean DISPLAY_SIMPLE_STATS = true;
 
-    static final boolean SHOW_PROCESSED_DIRS = true;
-    static final boolean SHOW_PROCESSED_FILES = false;
+    static final boolean SHOW_PROCESSED_DIRS = false;
+    static final boolean SHOW_PROCESSED_FILES = true;
 
     public String cssLink = null;
     ThreadPool pool;
@@ -39,9 +38,10 @@ public class Htmlify {
         if (USE_MULTITHREADING) {
             int threads = Runtime.getRuntime().availableProcessors();
             assert(threads > 0);
+            threads = 30;
             System.out.printf("Using %d threads\n", threads);
             pool = new ThreadPool(threads);
-//            pool = new ThreadPool(threads > 2 ? threads - 1 : threads);
+//            pool = new ThreadPool(threads > 1 ? threads - 1 : threads);
         } else {
             pool = null;
         }
@@ -73,6 +73,7 @@ public class Htmlify {
         private final BlockingQueue<FileProcessTask> taskQueue = new LinkedBlockingQueue<>();
         private boolean isStopped = false;
 
+        // Initializes the ThreadPool and spawns and runs n Worker threads.
         ThreadPool (int numThreads) {
             for (int i = 0; i < numThreads; ++i) {
 //                Stats stats = USE_FAST_STATS ? new FastStats() : new TimedStats();
@@ -84,32 +85,54 @@ public class Htmlify {
                 worker.start();
             }
         }
+        // Adds a task to be executed
         public synchronized void addTask (FileProcessTask task) {
             if (isStopped)
                 throw new IllegalStateException("Threadpool is stopped");
             taskQueue.offer(task);
         }
+
+        // Kills all child threads
         public synchronized void stop () {
             isStopped = true;
             for (Worker worker : workers)
                 worker.stopThread();
         }
+
+        // Returns true if there are no pending tasks and all child threads have finished execution
         public synchronized boolean done () {
+//            if (!taskQueue.isEmpty())
+//                return false;
+//            for (Worker worker : workers)
+//                if (worker.isRunningTask())
+//                    return false;
+//            return true;
+            // Unnecessary to manually wait for threads to finish running, since they'll automatically terminate after
+            // stop() is called (and not until then).
             return taskQueue.isEmpty();
         }
-
-
+        // Manually pops a task off the taskQueue.
+        // Enables the main thread to execute tasks alongside the workers if it's finished early and has nothing to do
+        // besides sleep.
+        public synchronized FileProcessTask getTask () throws InterruptedException {
+            return taskQueue.take();
+        }
+        // Returns the list of thread stats
         public synchronized List<Stats> getStats () {
             return threadStats;
         }
     }
 
+    // Worker thread that executes FileProcessingTasks
     static class Worker extends Thread {
         private boolean running = true;
         private final BlockingQueue<FileProcessTask> taskQueue;
         private final Parser parserInstance;
         private final Stats stats;
 
+        // Creates a worker that operates on a given taskQueue.
+        // parserInstance and stats should be unique instances of their respective classes that are owned
+        // by this thread. Sharing instances between threads will cause data corruption and errors.
         Worker (BlockingQueue<FileProcessTask> taskQueue, Parser parserInstance, Stats stats) {
             this.taskQueue = taskQueue;
             this.parserInstance = parserInstance;
@@ -122,7 +145,6 @@ public class Htmlify {
             while (running) {
                 try {
                     FileProcessTask task = taskQueue.take();
-//                    task.setParser(parserInstance);
                     task.setInstanceVars(parserInstance, stats);
                     task.run();
                 } catch (InterruptedException e) {
@@ -130,29 +152,38 @@ public class Htmlify {
                 }
             }
         }
+
+        // Kills the thread
         public synchronized void stopThread () {
             running = false;
             this.interrupt();
         }
+
+        // Returns whether the thread is currently running
         public synchronized boolean isStopped () {
             return !running;
         }
     }
 
+    // Encapsulates a multithreaded htmlify operation on a single file
     class FileProcessTask implements Runnable {
         public final File inputFile;
         public final File outputFile;
         private Parser parser = null;
-        private Stats stats = null;
+        private Stats  stats = null;
 
         FileProcessTask(File inputFile, File outputFile) {
             this.inputFile = inputFile;
             this.outputFile = outputFile;
         }
+
+        // Sets thread-specific state; must be called before run
         public void setInstanceVars (Parser parser, Stats stats) {
             this.parser = parser;
             this.stats = stats;
         }
+
+        // Executes the task on a given thread
         public void run() {
             stats.beginProcessingFile();
             StringBuilder sb = new StringBuilder();
@@ -189,13 +220,15 @@ public class Htmlify {
         }
     }
 
-    void processFile (File inputFile, File outputFile) {
+    // Adds a FileProcessingTask to be executed by one of the worker threads
+    void processFileMultithreaded(File inputFile, File outputFile) {
+        assert(USE_MULTITHREADING == true);
         ++fileCount;
         pool.addTask(new FileProcessTask(inputFile, outputFile));
     }
 
-    // singlethreaded only
-    void generateHtml (File inputFile, File outputFile) {
+    // Htmlifies a single file using the active thread
+    void processFileSinglethreaded(File inputFile, File outputFile) {
         stats.beginProcessingFile();
         ++fileCount;
         stats.beginFileRead();
@@ -230,7 +263,7 @@ public class Htmlify {
         stats.beginProcessingDir();
 
         if (SHOW_PROCESSED_DIRS)
-            System.out.printf("Processing '%s'\n", dir.getPath());
+            System.out.printf("Scanning '%s'\n", dir.getPath());
 
         File[] subdirs = dir.listFiles(new FileFilter() {
             @Override
@@ -244,20 +277,19 @@ public class Htmlify {
                 return name.endsWith(".java");
             }
         });
-        stats.endProcessingDir();
-        for (File subdir : subdirs)
-            processDir(subdir, rootPath, outputPath);
-
         for (File inputFile : inputFiles) {
             File outputDir = new File(dir.getPath().replace(rootPath, outputPath));
             if (!outputDir.exists())
                 outputDir.mkdirs();
             File outputFile = new File(inputFile.getPath().replace(rootPath, outputPath).replace(".java", ".html"));
             if (USE_MULTITHREADING)
-                processFile(inputFile, outputFile);
+                processFileMultithreaded(inputFile, outputFile);
             else
-                generateHtml(inputFile, outputFile);
+                processFileSinglethreaded(inputFile, outputFile);
         }
+        stats.endProcessingDir();
+        for (File subdir : subdirs)
+            processDir(subdir, rootPath, outputPath);
     }
 
     public static void main (String[] args) {
@@ -290,10 +322,14 @@ public class Htmlify {
 
         stats.startHtmlify();
         htmlify.processDir(new File(inputDir), inputDir, outputDir);
+        Stats mainThreadStats = new ThreadStats();
         if (USE_MULTITHREADING) {
+            // If tasks still aren't done, use this thread to augment the worker threads
             while (!htmlify.pool.done()) {
                 try {
-                    Thread.sleep(50);
+                    FileProcessTask task = htmlify.pool.getTask();
+                    task.setInstanceVars(htmlify.parser, mainThreadStats);
+                    task.run();
                 } catch (InterruptedException ex) {
                     Thread.interrupted();
                 }
@@ -325,6 +361,7 @@ public class Htmlify {
                 System.out.println(threadStats.getStats());
             }
             System.out.println("Main thread stats: ");
+            System.out.println(mainThreadStats.getStats());
             System.out.println(stats.getStats());
         }
     }
