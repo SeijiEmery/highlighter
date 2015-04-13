@@ -1,6 +1,11 @@
 package highlighter;
 
 import java.io.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.LinkedBlockingQueue;
 
 /**
  * Created by Seiji on 4/11/15.
@@ -13,13 +18,33 @@ public class Htmlify {
     private final Stats stats;
     private final Parser parser;
 
+    static final boolean USE_MULTITHREADING = true;
+    static final boolean USE_NAIVE_MATCHER  = false;
+    static final boolean USE_FAST_STATS     = true;
+
     public String cssLink = null;
+    ThreadPool pool;
 
     public Htmlify (Stats stats, String cssLink) {
         this.stats = stats;
-        this.parser = new Parser(new NaiveMatcher(stats), stats);
-//        this.parser = new Parser(new StringMatcher(stats), stats);
+
+        this.parser = USE_NAIVE_MATCHER ?
+                new Parser(new NaiveMatcher(stats), stats) :
+                new Parser(new StringMatcher(stats), stats);
         this.cssLink = cssLink;
+
+        int threads = Runtime.getRuntime().availableProcessors();
+        assert(threads > 0);
+        if (USE_MULTITHREADING)
+            pool = new ThreadPool(threads > 1 ? threads - 1 : threads);
+        else
+            pool = null;
+    }
+
+    @Override
+    public void finalize () {
+        if (USE_MULTITHREADING)
+            pool.stop();
     }
 
     private long parseTime;
@@ -36,15 +61,97 @@ public class Htmlify {
         fileCount = 0;
     }
 
+    class ThreadPool {
+        private final List<Worker> workers = new ArrayList<>();
+        private final BlockingQueue<Runnable> taskQueue = new LinkedBlockingQueue<>();
+        private boolean isStopped = false;
 
+        ThreadPool (int numThreads) {
+            for (int i = 0; i < numThreads; ++i)
+                workers.add(new Worker(taskQueue));
+            for (Worker worker : workers) {
+                worker.start();
+            }
+        }
+        public synchronized void addTask (Runnable task) {
+            if (isStopped)
+                throw new IllegalStateException("Threadpool is stopped");
+            taskQueue.offer(task);
+        }
+        public synchronized void stop () {
+            isStopped = true;
+            for (Worker worker : workers)
+                worker.stopThread();
+        }
+    }
+
+    static class Worker extends Thread {
+        private boolean running = true;
+        private final BlockingQueue<Runnable> taskQueue;
+
+        Worker (BlockingQueue<Runnable> taskQueue) {
+            this.taskQueue = taskQueue;
+        }
+
+        @Override
+        public void run () {
+            running = true;
+            while (running) {
+                try {
+                    Runnable runnable = taskQueue.take();
+                    runnable.run();
+                } catch (InterruptedException e) {
+                    Thread.interrupted();
+                }
+            }
+        }
+        public synchronized void stopThread () {
+            running = false;
+            this.interrupt();
+        }
+        public synchronized boolean isStopped () {
+            return !running;
+        }
+    }
+
+    class FileProcessTask implements Runnable {
+        public final File inputFile;
+        public final File outputFile;
+
+        FileProcessTask(File inputFile, File outputFile) {
+            this.inputFile = inputFile;
+            this.outputFile = outputFile;
+        }
+
+        public void run() {
+            StringBuilder sb = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new FileReader(inputFile))) {
+                int c;
+                while ((c = reader.read()) != -1)
+                    sb.append((char)c);
+            } catch (FileNotFoundException e) {
+                e.printStackTrace();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            String source = sb.toString();
+            String html = parser.makeHtml(source, cssLink);
+
+            try (BufferedWriter br = new BufferedWriter(new FileWriter(outputFile))) {
+                br.write(html);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    void processFile (File inputFile, File outputFile) {
+        ++fileCount;
+        pool.addTask(new FileProcessTask(inputFile, outputFile));
+    }
+
+    // singlethreaded only
     void generateHtml (File inputFile, File outputFile) {
-//        System.out.printf("Processing '%s'\n", inputFile.getPath());
-//        String source = null;
-//        try {
-//            source = String.join("\n", Files.readAllLines(inputFile.toPath()));
-//        } catch (IOException e) {
-//            e.printStackTrace();
-//        }
         stats.beginProcessingFile();
         ++fileCount;
         stats.beginFileRead();
@@ -60,9 +167,7 @@ public class Htmlify {
         }
         String source = sb.toString();
         stats.endFileRead();
-//        long t0 = System.nanoTime();
         String html = parser.makeHtml(source, cssLink);
-//        parseTime += (System.nanoTime() - t0);
 
         stats.beginFileWrite();
         try (BufferedWriter br = new BufferedWriter(new FileWriter(outputFile))) {
@@ -72,7 +177,6 @@ public class Htmlify {
         }
         stats.endFileWrite();
         stats.endProcessingFile();
-//        System.out.printf("Generated '%s'\n\n", outputFile.getPath());
     }
 
     void processDir (File dir, String rootPath, String outputPath) {
@@ -102,7 +206,10 @@ public class Htmlify {
             if (!outputDir.exists())
                 outputDir.mkdirs();
             File outputFile = new File(inputFile.getPath().replace(rootPath, outputPath).replace(".java", ".html"));
-            generateHtml(inputFile, outputFile);
+            if (USE_MULTITHREADING)
+                processFile(inputFile, outputFile);
+            else
+                generateHtml(inputFile, outputFile);
         }
     }
 
@@ -126,9 +233,11 @@ public class Htmlify {
             System.exit(-1);
         }
 
-//        Stats stats = new TimedStats();
-        Stats stats = new FastStats();
-        Htmlify htmlify = new Htmlify(stats, css);
+        final Stats stats = USE_FAST_STATS ?
+                new FastStats() :
+                new TimedStats();
+
+        final Htmlify htmlify = new Htmlify(stats, css);
 
 //        long startTime = System.nanoTime();
 
