@@ -71,23 +71,14 @@ public class Parser {
                 "+", "-", "*", "/", "%", "&", "|", "=", ":", "?"
         };
         textMatcher.add(terminals, TERMINAL);
+        textMatcher.rebuild();
 
         stats.endParserInit();
+    }
 
-//        long insertionTime = System.nanoTime();
-
-//        textMatcher.rebuild();
-//        long trieBuildTime = System.nanoTime();
-
-//        System.out.println("Parser structure: (DEBUG)");
-//        System.out.println(textMatcher);
-//        long printoutTime = System.nanoTime();
-
-//        double elapsedTime = (double)(printoutTime - startTime) * 1e-6;
-//        System.out.printf("Parser initialized in %f ms\n", elapsedTime);
-//        System.out.printf("\ttriebuilder:   %f ms\n", (double)(insertionTime - startTime) * 1e-6);
-//        System.out.printf("\ttrie rebuild:  %f ms\n", (double)(trieBuildTime - insertionTime) * 1e-6);
-//        System.out.printf("\ttrie printout: %f ms\n\n", (double)(printoutTime - trieBuildTime) * 1e-6);
+    public Parser (Parser other, Stats stats) {
+        this.textMatcher = other.textMatcher.cloneWith(stats);
+        this.stats = stats;
     }
 
     enum TokenType {
@@ -129,9 +120,9 @@ public class Parser {
     }
 
     // parse()-specific state
-    ArrayList<Token> tokens;
-    int start;
-    int prev;
+    ArrayList<Token> tokens = null;
+    int start = 0;
+    int prev  = 0;
 
     // Utility functions
     void beginToken (String s, int i) {
@@ -163,6 +154,7 @@ public class Parser {
 
         tokens = new ArrayList<Token>();
         prev = 0;
+        start = 0;
 
         int e;   // tmp var
 

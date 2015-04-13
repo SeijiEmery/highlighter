@@ -14,12 +14,25 @@ public class NaiveMatcher implements Matcher {
     public NaiveMatcher (Stats stats) {
         this.stats = stats;
     }
+    public NaiveMatcher (NaiveMatcher matcher, Stats stats) {
+        this.stats = stats;
+        this.sequences = new HashMap<>(matcher.sequences);
+        this.maxLen = matcher.maxLen;
+    }
+
+
 //    public NaiveMatcher (String s, int tags) {
 //        add(s, tags);
 //    }
 //    public NaiveMatcher (String[] s, int tags) {
 //        add(s, tags);
 //    }
+
+    public Matcher cloneWith (Stats stats) {
+        return new NaiveMatcher(this, stats);
+    }
+
+    public void rebuild () {}
 
     @Override
     public void add(String s, int tags) {

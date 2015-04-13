@@ -21,6 +21,10 @@ public class Htmlify {
     static final boolean USE_MULTITHREADING = true;
     static final boolean USE_NAIVE_MATCHER  = false;
     static final boolean USE_FAST_STATS     = true;
+    static final boolean DISPLAY_SIMPLE_STATS = true;
+
+    static final boolean SHOW_PROCESSED_DIRS = true;
+    static final boolean SHOW_PROCESSED_FILES = false;
 
     public String cssLink = null;
     ThreadPool pool;
@@ -32,13 +36,15 @@ public class Htmlify {
                 new Parser(new NaiveMatcher(stats), stats) :
                 new Parser(new StringMatcher(stats), stats);
         this.cssLink = cssLink;
-
-        int threads = Runtime.getRuntime().availableProcessors();
-        assert(threads > 0);
-        if (USE_MULTITHREADING)
-            pool = new ThreadPool(threads > 1 ? threads - 1 : threads);
-        else
+        if (USE_MULTITHREADING) {
+            int threads = Runtime.getRuntime().availableProcessors();
+            assert(threads > 0);
+            System.out.printf("Using %d threads\n", threads);
+            pool = new ThreadPool(threads);
+//            pool = new ThreadPool(threads > 2 ? threads - 1 : threads);
+        } else {
             pool = null;
+        }
     }
 
     @Override
@@ -63,17 +69,22 @@ public class Htmlify {
 
     class ThreadPool {
         private final List<Worker> workers = new ArrayList<>();
-        private final BlockingQueue<Runnable> taskQueue = new LinkedBlockingQueue<>();
+        private final List<Stats>  threadStats = new ArrayList<>();
+        private final BlockingQueue<FileProcessTask> taskQueue = new LinkedBlockingQueue<>();
         private boolean isStopped = false;
 
         ThreadPool (int numThreads) {
-            for (int i = 0; i < numThreads; ++i)
-                workers.add(new Worker(taskQueue));
+            for (int i = 0; i < numThreads; ++i) {
+//                Stats stats = USE_FAST_STATS ? new FastStats() : new TimedStats();
+                Stats stats = new ThreadStats();
+                threadStats.add(stats);
+                workers.add(new Worker(taskQueue, new Parser(parser, stats), stats));
+            }
             for (Worker worker : workers) {
                 worker.start();
             }
         }
-        public synchronized void addTask (Runnable task) {
+        public synchronized void addTask (FileProcessTask task) {
             if (isStopped)
                 throw new IllegalStateException("Threadpool is stopped");
             taskQueue.offer(task);
@@ -83,14 +94,26 @@ public class Htmlify {
             for (Worker worker : workers)
                 worker.stopThread();
         }
+        public synchronized boolean done () {
+            return taskQueue.isEmpty();
+        }
+
+
+        public synchronized List<Stats> getStats () {
+            return threadStats;
+        }
     }
 
     static class Worker extends Thread {
         private boolean running = true;
-        private final BlockingQueue<Runnable> taskQueue;
+        private final BlockingQueue<FileProcessTask> taskQueue;
+        private final Parser parserInstance;
+        private final Stats stats;
 
-        Worker (BlockingQueue<Runnable> taskQueue) {
+        Worker (BlockingQueue<FileProcessTask> taskQueue, Parser parserInstance, Stats stats) {
             this.taskQueue = taskQueue;
+            this.parserInstance = parserInstance;
+            this.stats = stats;
         }
 
         @Override
@@ -98,8 +121,10 @@ public class Htmlify {
             running = true;
             while (running) {
                 try {
-                    Runnable runnable = taskQueue.take();
-                    runnable.run();
+                    FileProcessTask task = taskQueue.take();
+//                    task.setParser(parserInstance);
+                    task.setInstanceVars(parserInstance, stats);
+                    task.run();
                 } catch (InterruptedException e) {
                     Thread.interrupted();
                 }
@@ -117,31 +142,50 @@ public class Htmlify {
     class FileProcessTask implements Runnable {
         public final File inputFile;
         public final File outputFile;
+        private Parser parser = null;
+        private Stats stats = null;
 
         FileProcessTask(File inputFile, File outputFile) {
             this.inputFile = inputFile;
             this.outputFile = outputFile;
         }
-
+        public void setInstanceVars (Parser parser, Stats stats) {
+            this.parser = parser;
+            this.stats = stats;
+        }
         public void run() {
+            stats.beginProcessingFile();
             StringBuilder sb = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(new FileReader(inputFile))) {
                 int c;
                 while ((c = reader.read()) != -1)
                     sb.append((char)c);
             } catch (FileNotFoundException e) {
+                System.err.printf("Error reading '%s'\n", inputFile);
                 e.printStackTrace();
             } catch (IOException e) {
+                System.err.printf("Error reading '%s'\n", inputFile);
                 e.printStackTrace();
             }
             String source = sb.toString();
-            String html = parser.makeHtml(source, cssLink);
+            String html = null;
 
+            try {
+                html = parser.makeHtml(source, cssLink);
+            } catch (Exception ex) {
+                System.err.printf("Error parsing '%s' in thread '%s'\n", inputFile, Thread.currentThread().getName());
+                ex.printStackTrace(System.err);
+                return;
+            }
             try (BufferedWriter br = new BufferedWriter(new FileWriter(outputFile))) {
                 br.write(html);
             } catch (IOException e) {
+                System.err.printf("Error writing to '%s'\n", outputFile);
                 e.printStackTrace();
             }
+            if (SHOW_PROCESSED_FILES)
+                System.out.printf("Processed '%s'\n", inputFile);
+            stats.endProcessingFile();
         }
     }
 
@@ -177,13 +221,16 @@ public class Htmlify {
         }
         stats.endFileWrite();
         stats.endProcessingFile();
+        if (SHOW_PROCESSED_FILES)
+            System.out.printf("Processed '%s'\n", inputFile);
     }
 
     void processDir (File dir, String rootPath, String outputPath) {
         assert(dir.isDirectory() && dir.exists());
         stats.beginProcessingDir();
 
-        System.out.printf("Processing '%s'\n", dir.getPath());
+        if (SHOW_PROCESSED_DIRS)
+            System.out.printf("Processing '%s'\n", dir.getPath());
 
         File[] subdirs = dir.listFiles(new FileFilter() {
             @Override
@@ -243,6 +290,16 @@ public class Htmlify {
 
         stats.startHtmlify();
         htmlify.processDir(new File(inputDir), inputDir, outputDir);
+        if (USE_MULTITHREADING) {
+            while (!htmlify.pool.done()) {
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException ex) {
+                    Thread.interrupted();
+                }
+            }
+            htmlify.pool.stop();
+        }
         stats.endHtmlify();
 
 //        double elapsedTime = (double)(System.nanoTime() - startTime) * 1e-6;
@@ -252,6 +309,23 @@ public class Htmlify {
 //        System.out.printf("\toverhead:   %f ms\n", elapsedTime - htmlify.getParseTime());
 //        System.out.printf("\ttotal run time: %f ms\n", elapsedTime);
 
-        System.out.println(stats.getAdjustedStats());
+        if (DISPLAY_SIMPLE_STATS)
+            System.out.println(stats.getStats());
+        else
+            System.out.println(stats.getAdjustedStats());
+
+//        if (USE_MULTITHREADING && !USE_FAST_STATS) {
+//            System.out.println("Warning: profiler information is unpredictable when used with multithreading");
+//        }
+
+        if (USE_MULTITHREADING) {
+            int i = 0;
+            for (Stats threadStats : htmlify.pool.getStats()) {
+                System.out.printf("Thread %d stats:\n", i++);
+                System.out.println(threadStats.getStats());
+            }
+            System.out.println("Main thread stats: ");
+            System.out.println(stats.getStats());
+        }
     }
 }

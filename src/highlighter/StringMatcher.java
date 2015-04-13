@@ -199,6 +199,15 @@ public class StringMatcher implements Matcher {
         this.stats = stats;
         this.builder = new TrieBuilder();
     }
+    public StringMatcher (StringMatcher matcher, Stats stats) {
+        this.stats = stats;
+        this.builder = matcher.builder;
+        this.trie = matcher.trie;
+    }
+    @Override
+    public Matcher cloneWith (Stats stats) {
+        return new StringMatcher(this, stats);
+    }
 
     // Construct a new StringMatcher and insert the following strings with the given tag
     public StringMatcher(Stats stats, String[] strings, int tag) {
