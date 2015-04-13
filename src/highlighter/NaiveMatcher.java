@@ -8,9 +8,12 @@ import java.util.Map;
  */
 public class NaiveMatcher implements Matcher {
     Map<String, Integer> sequences = new HashMap<>();
+    Stats stats;
     int maxLen = 0;
 
-    public NaiveMatcher (Stats stats) {}
+    public NaiveMatcher (Stats stats) {
+        this.stats = stats;
+    }
 //    public NaiveMatcher (String s, int tags) {
 //        add(s, tags);
 //    }
@@ -20,6 +23,7 @@ public class NaiveMatcher implements Matcher {
 
     @Override
     public void add(String s, int tags) {
+        stats.beginTrieInit();
         if (s.length() > maxLen)
             maxLen = s.length();
         if (sequences.containsKey(s)) {
@@ -27,6 +31,7 @@ public class NaiveMatcher implements Matcher {
         } else {
             sequences.put(s, tags);
         }
+        stats.endTrieInit();
     }
 
     @Override
@@ -43,6 +48,7 @@ public class NaiveMatcher implements Matcher {
     public int match(String s, int i) {
         int lastMatch = -1;
         int lastMatchTags = 0;
+        stats.beginTrieMatch();
 
         for (int j = i+1, n = Math.min(s.length(), i + maxLen); j < n; ++j) {
             String substr = s.substring(i, j);
@@ -51,6 +57,7 @@ public class NaiveMatcher implements Matcher {
                 lastMatchTags = sequences.get(substr);
             }
         }
+        stats.endTrieMatch();
 
         if (lastMatch > 0) {
             matched = lastMatch - i;

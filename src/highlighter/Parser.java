@@ -412,7 +412,7 @@ public class Parser {
             e.printStackTrace();
         }
 
-        Stats stats = new Stats();
+        Stats stats = new TimedStats();
 
         String sourceCode = sb.toString();
         String html = new Parser(new StringMatcher(stats), stats).makeHtml(sourceCode, cssFile);

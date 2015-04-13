@@ -11,14 +11,14 @@ import java.io.*;
 public class Htmlify {
 //    private final Parser parser = new Parser(new StringMatcher());
     private final Stats stats;
-    private final Parser parser;// = new Parser(new NaiveMatcher());
+    private final Parser parser;
 
     public String cssLink = null;
 
     public Htmlify (Stats stats, String cssLink) {
         this.stats = stats;
-//        this.parser = new Parser(new NaiveMatcher(stats), stats);
-        this.parser = new Parser(new StringMatcher(stats), stats);
+        this.parser = new Parser(new NaiveMatcher(stats), stats);
+//        this.parser = new Parser(new StringMatcher(stats), stats);
         this.cssLink = cssLink;
     }
 
@@ -126,7 +126,8 @@ public class Htmlify {
             System.exit(-1);
         }
 
-        Stats stats = new Stats();
+//        Stats stats = new TimedStats();
+        Stats stats = new FastStats();
         Htmlify htmlify = new Htmlify(stats, css);
 
 //        long startTime = System.nanoTime();
@@ -142,6 +143,6 @@ public class Htmlify {
 //        System.out.printf("\toverhead:   %f ms\n", elapsedTime - htmlify.getParseTime());
 //        System.out.printf("\ttotal run time: %f ms\n", elapsedTime);
 
-        System.out.println(stats.getStats());
+        System.out.println(stats.getAdjustedStats());
     }
 }

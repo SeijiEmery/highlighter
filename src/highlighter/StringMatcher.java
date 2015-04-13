@@ -224,10 +224,8 @@ public class StringMatcher implements Matcher {
 
     // Add a rule to match the following strings to the given tag
     public void add (String[] strings, int tag) {
-        stats.beginTrieInit();
         for (String s : strings)
             add(s, tag);
-        stats.endTrieInit();
     }
 
     // Rebuilds the internal trie structure from the current set of rules.
